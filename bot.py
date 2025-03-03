@@ -25,7 +25,7 @@ def log_vps_event(event):
     with open(log_file, "a") as log:
         log.write(f"{event}\n")
 
-# VPS Creation Command (Admin Only, No Docker)
+# VPS Creation Command (Admin Only, Using screen)
 @bot.tree.command(name="create", description="Creates a custom VPS instance (Admin Only).")
 @app_commands.describe(member_name="Member name", cpu="CPU cores", ram="RAM (GB)", disk="Disk size (GB)")
 async def create(interaction: discord.Interaction, member_name: str, cpu: int, ram: int, disk: int):
@@ -38,16 +38,15 @@ async def create(interaction: discord.Interaction, member_name: str, cpu: int, r
     await interaction.response.send_message(f"Creating VPS for {member_name}...", ephemeral=True)
 
     try:
-        # Install required packages
-        subprocess.run("sudo apt update && sudo apt install -y tmate", shell=True, check=True)
+        # Install required package
+        subprocess.run("sudo apt update && sudo apt install -y screen", shell=True, check=True)
 
-        # Start tmate session
+        # Create a screen session for the VPS
         session_name = f"vps-{random.randint(1000, 9999)}"
-        subprocess.run(f"tmate -S /tmp/{session_name}.sock new-session -d", shell=True, check=True)
-        subprocess.run(f"tmate -S /tmp/{session_name}.sock wait tmate-ready", shell=True, check=True)
+        subprocess.run(f"screen -dmS {session_name} bash", shell=True, check=True)
 
-        # Get SSH connection details
-        ssh_command = subprocess.check_output(f"tmate -S /tmp/{session_name}.sock display -p '#{tmate_ssh}'", shell=True).decode().strip()
+        # Generate reconnection command
+        ssh_command = f"screen -r {session_name}"
 
         log_vps_event(f"VPS {member_name} created by {interaction.user.name} (ID: {userid})")
 
@@ -55,7 +54,7 @@ async def create(interaction: discord.Interaction, member_name: str, cpu: int, r
         with open(database_file, "a") as f:
             f.write(f"{userid}|{member_name}|{session_name}|{ssh_command}\n")
 
-        await interaction.followup.send(f"✅ VPS `{member_name}` created!\n🔗 SSH Command: `{ssh_command}`", ephemeral=True)
+        await interaction.followup.send(f"✅ VPS `{member_name}` created!\n🔗 Reconnect Command: `{ssh_command}`", ephemeral=True)
 
     except subprocess.CalledProcessError as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
@@ -78,11 +77,11 @@ async def list_vps(interaction: discord.Interaction):
     with open(database_file, "r") as f:
         for line in f:
             user_id, vps_name, session_name, ssh_command = line.strip().split("|")
-            embed.add_field(name=f"🔹 {vps_name}", value=f"👤 Owner: <@{user_id}>\n🔗 SSH: `{ssh_command}`", inline=False)
+            embed.add_field(name=f"🔹 {vps_name}", value=f"👤 Owner: <@{user_id}>\n🔗 Reconnect: `{ssh_command}`", inline=False)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# Kill All VPS Command (Admin Only, No Docker)
+# Kill All VPS Command (Admin Only)
 @bot.tree.command(name="killvps", description="Kill all user VPS instances. (Admin Only)")
 async def kill_vps(interaction: discord.Interaction):
     userid = str(interaction.user.id)
@@ -93,7 +92,7 @@ async def kill_vps(interaction: discord.Interaction):
 
     await interaction.response.send_message("⚠️ **Stopping all VPS instances...**", ephemeral=True)
 
-    subprocess.run("pkill -f tmate", shell=True, check=True)
+    subprocess.run("pkill -f screen", shell=True, check=True)
 
     # Clear database
     open(database_file, "w").close()
