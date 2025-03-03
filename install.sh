@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Starting Installation..."
+echo "🚀 Starting Automated Installation..."
 
 # Prompt for Bot Token
 read -p "Enter your Discord Bot Token: " BOT_TOKEN
@@ -21,11 +21,19 @@ pip3 install discord docker asyncio
 echo "📥 Downloading bot.py from GitHub..."
 wget -O bot.py https://raw.githubusercontent.com/DPWORLD2/DPWORLD-FULLCODED-VPS-BOT/main/bot.py
 
+# Download Dockerfile from GitHub
+echo "📥 Downloading Dockerfile from GitHub..."
+wget -O Dockerfile https://raw.githubusercontent.com/DPWORLD2/DPWORLD-FULLCODED-VPS-BOT/main/Dockerfile
+
 # Update Bot Token in bot.py
 echo "🔑 Updating bot.py with your token..."
 sed -i "s/YOUR_BOT_TOKEN/$BOT_TOKEN/g" bot.py
 
-# Run the Bot
+# Build Docker Image
+echo "🐳 Building Docker image..."
+docker build -t ubuntu-22.04-with-tmate .
+
+# Start the Bot
 echo "🤖 Starting Discord Bot..."
 nohup python3 bot.py &
 
