@@ -18,7 +18,7 @@ user_tokens = {}
 database_file = "database.txt"
 log_file = "vps_logs.txt"
 SERVER_LIMIT = 100
-whitelist_ids = {"ADMIN_USER_ID"}  
+whitelist_ids = {"853279989586853908"}  
 
 # Utility Functions
 def log_vps_event(event):
