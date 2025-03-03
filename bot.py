@@ -14,7 +14,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # In-memory storage
-user_tokens = {}  # Stores tokens for each user
+user_tokens = {}  
 database_file = "database.txt"
 log_file = "vps_logs.txt"
 SERVER_LIMIT = 100
@@ -44,26 +44,19 @@ def get_user_servers(userid):
     with open(database_file, "r") as f:
         return [line.strip() for line in f if line.startswith(userid)]
 
-def get_container_id_from_database(userid, container_name):
-    servers = get_user_servers(userid)
-    for server in servers:
-        parts = server.split("|")
-        if container_name in parts:
-            return parts[1]
-    return None
-
 def log_vps_event(event):
     with open(log_file, "a") as log:
         log.write(f"{event}\n")
 
-# VPS Creation Command
-@bot.tree.command(name="create", description="Creates a custom VPS instance.")
+# VPS Creation Command (Admin Only)
+@bot.tree.command(name="create", description="Creates a custom VPS instance (Admin Only).")
 @app_commands.describe(member_name="Member name", cpu="CPU cores", ram="RAM (GB)", disk="Disk size (GB)")
 async def create(interaction: discord.Interaction, member_name: str, cpu: int, ram: int, disk: int):
     userid = str(interaction.user.id)
 
-    if user_tokens.get(userid, 0) <= 0:
-        await interaction.response.send_message("❌ You don't have enough tokens to create a VPS!", ephemeral=True)
+    # Check if user is an admin
+    if userid not in whitelist_ids:
+        await interaction.response.send_message("❌ You don't have permission to create a VPS!", ephemeral=True)
         return
 
     if len(get_user_servers(userid)) >= SERVER_LIMIT:
@@ -93,7 +86,7 @@ async def create(interaction: discord.Interaction, member_name: str, cpu: int, r
     except subprocess.CalledProcessError as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-# Give Tokens Command
+# Give Tokens Command (Admin Only)
 @bot.tree.command(name="givetokens", description="Gives tokens to a user (Admin only).")
 @app_commands.describe(user="User to give tokens", amount="Number of tokens to give")
 async def givetokens(interaction: discord.Interaction, user: discord.Member, amount: int):
@@ -104,41 +97,30 @@ async def givetokens(interaction: discord.Interaction, user: discord.Member, amo
     user_tokens[str(user.id)] = user_tokens.get(str(user.id), 0) + amount
     await interaction.response.send_message(f"✅ Gave `{amount}` tokens to {user.mention}!", ephemeral=True)
 
-# VPS Suspension Task (Every Hour)
-async def deduct_tokens():
-    while True:
-        await asyncio.sleep(3600)
-        for userid, tokens in list(user_tokens.items()):
-            if tokens > 0:
-                user_tokens[userid] -= 1
+# Kill All VPS Command (Admin Only)
+@bot.tree.command(name="killvps", description="Kill all user VPS instances. (Admin Only)")
+async def kill_vps(interaction: discord.Interaction):
+    userid = str(interaction.user.id)
 
-            if user_tokens[userid] == 0:
-                servers = get_user_servers(userid)
-                for server in servers:
-                    container_id = server.split("|")[1]
-                    subprocess.run(["docker", "stop", container_id], check=True)
-                    log_vps_event(f"VPS {server} suspended (User: {userid})")
+    if userid not in whitelist_ids:
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
 
-                user = await bot.fetch_user(int(userid))
-                if user:
-                    await user.send("⚠️ Your VPS has been **suspended** due to insufficient tokens!")
+    await interaction.response.send_message("⚠️ **Stopping and removing all VPS instances...**", ephemeral=True)
 
-                await asyncio.sleep(86400)
-                if user_tokens[userid] == 0:
-                    for server in get_user_servers(userid):
-                        container_id = server.split("|")[1]
-                        subprocess.run(["docker", "rm", container_id], check=True)
-                        remove_from_database(container_id)
-                        log_vps_event(f"VPS {server} deleted due to expiration (User: {userid})")
+    subprocess.run("docker rm -f $(docker ps -aq)", shell=True, check=True)
 
-                    if user:
-                        await user.send("❌ Your VPS has been **deleted** due to no tokens for 24 hours.")
+    with open(database_file, "w") as f:
+        f.write("")
+
+    log_vps_event(f"⚠️ ALL VPS INSTANCES WERE REMOVED BY {interaction.user.name} (ID: {userid})")
+
+    await interaction.followup.send("✅ **All VPS instances have been stopped and deleted.**", ephemeral=True)
 
 # Start Task on Bot Startup
 @bot.event
 async def on_ready():
     print(f'✅ Bot is online as {bot.user}')
     await bot.tree.sync()
-    bot.loop.create_task(deduct_tokens())
 
 bot.run(TOKEN)
