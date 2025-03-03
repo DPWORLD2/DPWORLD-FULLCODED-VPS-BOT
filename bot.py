@@ -16,6 +16,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 # In-memory storage
 user_tokens = {}  # Stores tokens for each user
 database_file = "database.txt"
+log_file = "vps_logs.txt"
 SERVER_LIMIT = 100
 whitelist_ids = {"ADMIN_USER_ID"}  # Replace with actual admin IDs
 
@@ -26,6 +27,16 @@ def generate_random_port():
 def add_to_database(userid, container_name, ssh_command):
     with open(database_file, 'a') as f:
         f.write(f"{userid}|{container_name}|{ssh_command}\n")
+
+def remove_from_database(container_id):
+    if not os.path.exists(database_file):
+        return
+    with open(database_file, "r") as f:
+        lines = f.readlines()
+    with open(database_file, "w") as f:
+        for line in lines:
+            if container_id not in line:
+                f.write(line)
 
 def get_user_servers(userid):
     if not os.path.exists(database_file):
@@ -41,13 +52,16 @@ def get_container_id_from_database(userid, container_name):
             return parts[1]
     return None
 
+def log_vps_event(event):
+    with open(log_file, "a") as log:
+        log.write(f"{event}\n")
+
 # VPS Creation Command
 @bot.tree.command(name="create", description="Creates a custom VPS instance.")
 @app_commands.describe(member_name="Member name", cpu="CPU cores", ram="RAM (GB)", disk="Disk size (GB)")
 async def create(interaction: discord.Interaction, member_name: str, cpu: int, ram: int, disk: int):
     userid = str(interaction.user.id)
 
-    # Check tokens
     if user_tokens.get(userid, 0) <= 0:
         await interaction.response.send_message("❌ You don't have enough tokens to create a VPS!", ephemeral=True)
         return
@@ -61,7 +75,6 @@ async def create(interaction: discord.Interaction, member_name: str, cpu: int, r
     image_name = "my-vps-image"
     ssh_port = generate_random_port()
 
-    # Build Docker image if it doesn’t exist
     subprocess.run(f"docker build -t {image_name} .", shell=True, check=True)
 
     try:
@@ -73,6 +86,7 @@ async def create(interaction: discord.Interaction, member_name: str, cpu: int, r
         ssh_command = f"ssh root@<VPS_IP> -p {ssh_port}"  # Replace <VPS_IP> with actual IP
 
         add_to_database(userid, container_id, ssh_command)
+        log_vps_event(f"VPS {member_name} created by {interaction.user.name} (ID: {userid})")
 
         await interaction.followup.send(f"✅ VPS `{member_name}` created!\n🔗 SSH Command: `{ssh_command}`", ephemeral=True)
 
@@ -93,20 +107,32 @@ async def givetokens(interaction: discord.Interaction, user: discord.Member, amo
 # VPS Suspension Task (Every Hour)
 async def deduct_tokens():
     while True:
-        await asyncio.sleep(3600)  # Runs every hour
+        await asyncio.sleep(3600)
         for userid, tokens in list(user_tokens.items()):
             if tokens > 0:
-                user_tokens[userid] -= 1  # Deduct 1 token per hour
+                user_tokens[userid] -= 1
 
             if user_tokens[userid] == 0:
                 servers = get_user_servers(userid)
                 for server in servers:
                     container_id = server.split("|")[1]
-                    subprocess.run(["docker", "stop", container_id], check=True)  # Suspend VPS
+                    subprocess.run(["docker", "stop", container_id], check=True)
+                    log_vps_event(f"VPS {server} suspended (User: {userid})")
 
                 user = await bot.fetch_user(int(userid))
                 if user:
                     await user.send("⚠️ Your VPS has been **suspended** due to insufficient tokens!")
+
+                await asyncio.sleep(86400)
+                if user_tokens[userid] == 0:
+                    for server in get_user_servers(userid):
+                        container_id = server.split("|")[1]
+                        subprocess.run(["docker", "rm", container_id], check=True)
+                        remove_from_database(container_id)
+                        log_vps_event(f"VPS {server} deleted due to expiration (User: {userid})")
+
+                    if user:
+                        await user.send("❌ Your VPS has been **deleted** due to no tokens for 24 hours.")
 
 # Start Task on Bot Startup
 @bot.event
@@ -116,4 +142,3 @@ async def on_ready():
     bot.loop.create_task(deduct_tokens())
 
 bot.run(TOKEN)
-          
